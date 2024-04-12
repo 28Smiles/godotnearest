@@ -1,20 +1,17 @@
-use std::collections::BTreeSet;
 use godot::prelude::*;
 use kdtree::KdTree;
+use regex::Regex;
 
 struct GodotNearest;
-
-#[gdextension]
-unsafe impl ExtensionLibrary for GodotNearest {}
 
 #[derive(GodotClass)]
 #[class(base=Node2D)]
 struct Nearest2D {
     #[export]
     groups: Array<GString>,
+    regex_cache: Vec<Regex>,
     base: Base<Node2D>,
-    needs_update: BTreeSet<String>,
-    tree: KdTree<f32, NodePath, [f32; 2]>,
+    tree: Vec<KdTree<f32, NodePath, [f32; 2]>>,
 }
 
 #[godot_api]
@@ -23,8 +20,7 @@ impl INode2D for Nearest2D {
         Self {
             groups: Array::new(),
             base,
-            needs_update: BTreeSet::new(),
-            tree: KdTree::new(2),
+            tree: Vec::new(),
         }
     }
 
@@ -43,11 +39,14 @@ impl INode2D for Nearest2D {
 
     fn to_string(&self) -> GString {
         format!(
-            "Nearest2D({})",
-            self.tree.iter_nearest(
-                &[0.0, 0.0],
-                &kdtree::distance::squared_euclidean,
-            ).unwrap().map(|(_, path)| path.to_string()).collect::<Vec<_>>().join(", ")
+            "Nearest2D({{{}}})",
+            self.tree.iter().zip(self.groups.iter_shared()).map(|(tree, group)| {
+                format!(
+                    "{}: {}",
+                    group.to_string(),
+                    tree.size()
+                )
+            }).collect::<Vec<_>>().join(", ")
         ).into()
     }
 }
@@ -62,7 +61,7 @@ impl Nearest2D {
         };
         // Add child to the tree
         let pos = child.get_global_position();
-        self.tree.add([pos.x, pos.y], child.get_path()).unwrap_or(());
+        self.tree.get_mut(0).unwrap().add([pos.x, pos.y], child.get_path()).unwrap_or(());
         // Add pos update signal
     }
 
@@ -74,34 +73,12 @@ impl Nearest2D {
         };
         // Remove child from the tree
         let pos = child.get_global_position();
-        self.tree.remove(&[pos.x, pos.y], &child.get_path()).unwrap_or(0);
-    }
-
-    fn apply_updates(&mut self) {
-        if !self.needs_update.is_empty() {
-            for path in self.needs_update.iter() {
-                let path = NodePath::from(path);
-                if let Some(node) = self.base().get_node(path.clone()) {
-                    if let Ok(node) = node.try_cast::<Node2D>() {
-                        let pos = node.get_global_position();
-                        self.tree.remove(&[pos.x, pos.y], &path).unwrap_or(0);
-                        self.tree.add([pos.x, pos.y], path).unwrap_or(());
-                    }
-                }
-            }
-            self.needs_update.clear();
-        }
+        self.tree.get_mut(0).unwrap().remove(&[pos.x, pos.y], &child.get_path()).unwrap_or(0);
     }
 
     #[func]
-    fn child_update_pos(&mut self, child: Gd<Node2D>) {
-        self.needs_update.insert(child.get_path().to_string());
-    }
-
-    #[func]
-    fn nearest(&mut self, pos: Vector2, group_idx: i64) -> Option<Gd<Node2D>> {
-        self.apply_updates();
-        match self.tree.iter_nearest(
+    fn nearest(&self, pos: Vector2, group_idx: i64) -> Option<Gd<Node2D>> {
+        match self.tree.get(group_idx as usize).unwrap().iter_nearest(
             &[pos.x, pos.y],
             &kdtree::distance::squared_euclidean,
         ).map(|mut i| i.next()) {
@@ -113,16 +90,23 @@ impl Nearest2D {
     }
 
     #[func]
-    fn nearest_array(&mut self, pos: Vector2, group_idx: i64) -> Array<Gd<Node2D>> {
-        self.apply_updates();
+    fn nearest_array(&self, pos: Vector2, group_idx: i64, length: i64) -> Array<Gd<Node2D>> {
         let pos = [pos.x, pos.y];
-        match self.tree.iter_nearest(
+        let iterator = match self.tree.get(group_idx as usize).unwrap().iter_nearest(
             &pos,
             &kdtree::distance::squared_euclidean,
         ) {
             Ok(iter) => iter,
             _ => return Array::new(),
-        }.map(|(_, path)| {
+        };
+        let length = if length < 0 {
+            self.tree.len()
+        } else {
+            length as usize
+        };
+        let iterator = iterator.take(length);
+
+        iterator.map(|(_, path)| {
             self.base().get_node(path.clone())
                 .map(|node| node.cast())
         }).flatten().collect()
