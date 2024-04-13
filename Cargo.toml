@@ -9,4 +9,4 @@ crate-type = ["cdylib"]
 [dependencies]
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
 kdtree = "0"
-regex = "1"
+regex-automata = { version = "0", features = ["meta"] }

@@ -141,7 +141,7 @@ version = "0.1.0"
 dependencies = [
  "godot",
  "kdtree",
- "regex",
+ "regex-automata",
 ]
 
 [[package]]
