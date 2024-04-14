@@ -6,7 +6,11 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+double-precision = ["godot/double-precision"]
+
 [dependencies]
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
 kdtree = "0"
 regex-automata = { version = "0", features = ["meta"] }
+num-traits = "0.2.18"
